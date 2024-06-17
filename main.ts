@@ -24,32 +24,32 @@ enum GameState {
   Error
 }
 
+type FieldOptions = {
+  field?: PlayingField,
+  height?: number,
+  width?: number,
+  holesPercentage?: number,
+}
+
 type Coord = [number, number]; // Coordinates should be given in the format [ x, y ] where [ 0, 0 ] is the top left corner of the field
 type PlayingField = Sprites[][];
 
 class Field {
   _field: PlayingField;
-  _playerCoords: Coord;
 
-  constructor( options ) {
+  constructor( options: FieldOptions ) {
     const { field, height, width, holesPercentage } = options;
 
     if( field ) {
-      const playerCoords = Field.findPlayerInField( field );
       this._field = field;
 
-      if( playerCoords[0] === -1, -1 ) {
-        this.addPlayerToField();
-      } else {
-        this._playerCoords = playerCoords;
-      }
-    } else {
+    } else if( height && width ) {
       this._field = Field.generateField( height, width, holesPercentage );
-      this.addPlayerToField();
+      this.addSprite( Sprites.PathCharacter );
     }
   }
 
-  static generateField( height: number, width: number, holesPercentage = DEFAULT_HOLES_PERCENTAGE): PlayingField {
+  static generateField( height = 3, width = 3, holesPercentage = DEFAULT_HOLES_PERCENTAGE): PlayingField {
     const tiles = height * width;
     const numOfHoles = Math.round(tiles * holesPercentage);
     const numOfPaths = tiles - numOfHoles - 1; // Don't forget to take away 1 for the hat! 
@@ -91,7 +91,11 @@ class Field {
     return [ -1, -1 ];
   }
 
-  addPlayerToField() {
+  get field() {
+    return this._field;
+  }
+
+  addSprite( newSprite: Sprites ) {
     const fieldHeight = this._field.length;
     const fieldWidth = this._field[0].length;
     let oldSprite: Sprites,
@@ -102,10 +106,9 @@ class Field {
       randomX = Math.floor(Math.random() * fieldWidth);
       randomY = Math.floor(Math.random() * fieldHeight);
       oldSprite = this._field[randomY][randomX];
-    } while( oldSprite === Sprites.Hat || oldSprite === Sprites.Hole )
+    } while( oldSprite === Sprites.Hat || oldSprite === Sprites.Hole || oldSprite === Sprites.PathCharacter )
 
-    this._playerCoords = [ randomX, randomY ];
-    this._field[randomY][randomX] = Sprites.PathCharacter;
+    this._field[randomY][randomX] = newSprite;
   }
 
   print() {
@@ -118,10 +121,16 @@ class Field {
     this._field[coordinate[1]][coordinate[0]] = newSprite;
   }
 
-  checkCurrentTile(): GameState {
-    const playerX = this._playerCoords[0];
-    const playerY = this._playerCoords[1];
+  checkTile( playerCoords: Coord ): GameState {
+    const playerX = playerCoords[0];
+    const playerY = playerCoords[1];
+    const fieldHeight = this._field.length;
+    const fieldWidth = this._field[0].length;
     const currentTileSprite = this._field[ playerY ][ playerX ];
+
+    if( playerX < 0 || playerY < 0 || playerX >= fieldWidth || playerY >= fieldHeight ) {
+      return GameState.OffField;
+    }
 
     switch( currentTileSprite ) {
       case Sprites.Hat:
@@ -131,7 +140,10 @@ class Field {
         return GameState.Hole;
       
       case Sprites.FieldCharacter:
-        this.setTile( this._playerCoords, Sprites.PathCharacter );
+        this.setTile( playerCoords, Sprites.PathCharacter );
+        return GameState.Playing;
+
+      case Sprites.PathCharacter:
         return GameState.Playing;
 
       default:
@@ -139,66 +151,71 @@ class Field {
     }
   }
 
-  move( direction: string ): GameState {
+  move( direction: string, playerCoords: Coord ): Coord | GameState {
     switch( direction ) {
       case Directions.Up:
-        if( this._playerCoords[1] === 0 ) {
-          return GameState.OffField;
-        }
-
-        this._playerCoords[1]--;
-        break;
+        return [ playerCoords[0], playerCoords[1] - 1 ];
 
       case Directions.Down:
-        if( this._playerCoords[1] === this._field.length ) {
-          return GameState.OffField;
-        }
-
-        this._playerCoords[1]++;
-        break;
+        return [ playerCoords[0], playerCoords[1] + 1 ];
 
       case Directions.Left:
-        if( this._playerCoords[0] === 0 ) {
-          return GameState.OffField;
-        }
-
-        this._playerCoords[0]--;
-        break;
+        return [ playerCoords[0] - 1, playerCoords[1] ];
 
       case Directions.Right:
-        if( this._playerCoords[0] ===  this._field[0].length ) {
-          return GameState.OffField;
-        }
-
-        this._playerCoords[0]++;
-        break;
+        return [ playerCoords[0] + 1, playerCoords[1] ];
 
       default:
         throw new Error( `Error: invalid direction: ${direction}. Use wasd.`);
     }
-
-    return this.checkCurrentTile();
   }
 }
 
-const initialField = [
-  [Sprites.FieldCharacter, Sprites.FieldCharacter, Sprites.Hole],
-  [Sprites.FieldCharacter, Sprites.Hole, Sprites.FieldCharacter],
-  [Sprites.FieldCharacter, Sprites.Hat, Sprites.FieldCharacter],
-];
+class Game {
+  _gamestate: GameState;
+  _turnNumber: number;
+  _field: Field;
+  _hardmode: boolean;
+  _playerCoords: Coord;
 
-const playField = new Field( { field: initialField } );
-// const playField = new Field({ height: 4, width: 5 });
+  constructor( field: Field, hardmode = false ) {
+    this._gamestate = GameState.Playing;
+    this._turnNumber = 0;
+    this._field = field;
+    this._playerCoords = Field.findPlayerInField( field.field );
+    this._hardmode = hardmode;
+  }
 
-const playGame = () => {
-  while( true ) {
-    let gameState :GameState;
-    playField.print();
+  get turnNumber() {
+    return this._turnNumber;
+  }
 
+  get gamestate() {
+    return this._gamestate;
+  }
+
+  incrementTurn() {
+    this._turnNumber++;
+  }
+
+  setGamestate( newGamestate: GameState ) {
+    this._gamestate = newGamestate;
+  }
+
+  takeTurn() {
     const direction = promptSync( 'Which direction do you want to move? (use wasd)' );
-    gameState = playField.move( direction );
+    const movement: GameState | Coord = this._field.move( direction, this._playerCoords );
 
-    switch( gameState ) {
+    if( Array.isArray( movement ) ) {
+      this._playerCoords = movement;
+      this._gamestate = this._field.checkTile( this._playerCoords );
+    } else {
+      console.log('Returned gamestate');
+      this._gamestate = movement;
+    }
+    
+
+    switch( game.gamestate ) {
       case GameState.Won:
         console.log('Congratulations! You found your hat!');
         return;
@@ -216,6 +233,29 @@ const playGame = () => {
         return;
     }
   }
+
+  playGame() {
+    while( this._gamestate === GameState.Playing ) {
+      playField.print();
+      
+      this.takeTurn();
+      this.incrementTurn();
+  
+      if( this._hardmode ) {
+        this._field.addSprite( Sprites.Hole );
+      }
+    }
+  }
 }
 
-playGame();
+const initialField = [
+  [Sprites.FieldCharacter, Sprites.FieldCharacter, Sprites.Hole],
+  [Sprites.FieldCharacter, Sprites.Hole, Sprites.FieldCharacter],
+  [Sprites.FieldCharacter, Sprites.Hat, Sprites.FieldCharacter],
+];
+
+// const playField = new Field( { field: initialField } );
+const playField = new Field({ height: 4, width: 5 });
+
+const game = new Game( playField, false );
+game.playGame();

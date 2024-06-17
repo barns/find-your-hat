@@ -1,4 +1,5 @@
 var promptSync = require('prompt-sync')({ sigint: true });
+var DEFAULT_HOLES_PERCENTAGE = 0.2;
 var Sprites;
 (function (Sprites) {
     Sprites["Hat"] = "^";
@@ -25,22 +26,17 @@ var Field = /** @class */ (function () {
     function Field(options) {
         var field = options.field, height = options.height, width = options.width, holesPercentage = options.holesPercentage;
         if (field) {
-            var playerCoords = Field.findPlayerInField(field);
             this._field = field;
-            if (playerCoords[0] === -1, -1) {
-                this.addPlayerToField();
-            }
-            else {
-                this._playerCoords = playerCoords;
-            }
         }
-        else {
+        else if (height && width) {
             this._field = Field.generateField(height, width, holesPercentage);
-            this.addPlayerToField();
+            this.addSprite(Sprites.PathCharacter);
         }
     }
     Field.generateField = function (height, width, holesPercentage) {
-        if (holesPercentage === void 0) { holesPercentage = 0.2; }
+        if (height === void 0) { height = 3; }
+        if (width === void 0) { width = 3; }
+        if (holesPercentage === void 0) { holesPercentage = DEFAULT_HOLES_PERCENTAGE; }
         var tiles = height * width;
         var numOfHoles = Math.round(tiles * holesPercentage);
         var numOfPaths = tiles - numOfHoles - 1; // Don't forget to take away 1 for the hat! 
@@ -73,7 +69,14 @@ var Field = /** @class */ (function () {
         }
         return [-1, -1];
     };
-    Field.prototype.addPlayerToField = function () {
+    Object.defineProperty(Field.prototype, "field", {
+        get: function () {
+            return this._field;
+        },
+        enumerable: false,
+        configurable: true
+    });
+    Field.prototype.addSprite = function (newSprite) {
         var fieldHeight = this._field.length;
         var fieldWidth = this._field[0].length;
         var oldSprite, randomX, randomY;
@@ -81,9 +84,8 @@ var Field = /** @class */ (function () {
             randomX = Math.floor(Math.random() * fieldWidth);
             randomY = Math.floor(Math.random() * fieldHeight);
             oldSprite = this._field[randomY][randomX];
-        } while (oldSprite === Sprites.Hat || oldSprite === Sprites.Hole);
-        this._playerCoords = [randomX, randomY];
-        this._field[randomY][randomX] = Sprites.PathCharacter;
+        } while (oldSprite === Sprites.Hat || oldSprite === Sprites.Hole || oldSprite === Sprites.PathCharacter);
+        this._field[randomY][randomX] = newSprite;
     };
     Field.prototype.print = function () {
         this._field.forEach(function (row) {
@@ -93,69 +95,86 @@ var Field = /** @class */ (function () {
     Field.prototype.setTile = function (coordinate, newSprite) {
         this._field[coordinate[1]][coordinate[0]] = newSprite;
     };
-    Field.prototype.checkCurrentTile = function () {
-        var playerX = this._playerCoords[0];
-        var playerY = this._playerCoords[1];
+    Field.prototype.checkTile = function (playerCoords) {
+        var playerX = playerCoords[0];
+        var playerY = playerCoords[1];
+        var fieldHeight = this._field.length;
+        var fieldWidth = this._field[0].length;
         var currentTileSprite = this._field[playerY][playerX];
+        if (playerX < 0 || playerY < 0 || playerX >= fieldWidth || playerY >= fieldHeight) {
+            return GameState.OffField;
+        }
         switch (currentTileSprite) {
             case Sprites.Hat:
                 return GameState.Won;
             case Sprites.Hole:
                 return GameState.Hole;
             case Sprites.FieldCharacter:
-                this.setTile(this._playerCoords, Sprites.PathCharacter);
+                this.setTile(playerCoords, Sprites.PathCharacter);
+                return GameState.Playing;
+            case Sprites.PathCharacter:
                 return GameState.Playing;
             default:
                 return GameState.Error;
         }
     };
-    Field.prototype.move = function (direction) {
+    Field.prototype.move = function (direction, playerCoords) {
         switch (direction) {
             case Directions.Up:
-                if (this._playerCoords[1] === 0) {
-                    return GameState.OffField;
-                }
-                this._playerCoords[1]--;
-                break;
+                return [playerCoords[0], playerCoords[1] - 1];
             case Directions.Down:
-                if (this._playerCoords[1] === this._field.length) {
-                    return GameState.OffField;
-                }
-                this._playerCoords[1]++;
-                break;
+                return [playerCoords[0], playerCoords[1] + 1];
             case Directions.Left:
-                if (this._playerCoords[0] === 0) {
-                    return GameState.OffField;
-                }
-                this._playerCoords[0]--;
-                break;
+                return [playerCoords[0] - 1, playerCoords[1]];
             case Directions.Right:
-                if (this._playerCoords[0] === this._field[0].length) {
-                    return GameState.OffField;
-                }
-                this._playerCoords[0]++;
-                break;
+                return [playerCoords[0] + 1, playerCoords[1]];
             default:
                 throw new Error("Error: invalid direction: ".concat(direction, ". Use wasd."));
         }
-        return this.checkCurrentTile();
     };
     return Field;
 }());
-var initialField = [
-    [Sprites.FieldCharacter, Sprites.FieldCharacter, Sprites.Hole],
-    [Sprites.FieldCharacter, Sprites.Hole, Sprites.FieldCharacter],
-    [Sprites.FieldCharacter, Sprites.Hat, Sprites.FieldCharacter],
-];
-var playField = new Field({ field: initialField });
-// const playField = new Field({ height: 4, width: 5 });
-var playGame = function () {
-    while (true) {
-        var gameState = void 0;
-        playField.print();
+var Game = /** @class */ (function () {
+    function Game(field, hardmode) {
+        if (hardmode === void 0) { hardmode = false; }
+        this._gamestate = GameState.Playing;
+        this._turnNumber = 0;
+        this._field = field;
+        this._playerCoords = Field.findPlayerInField(field.field);
+        this._hardmode = hardmode;
+    }
+    Object.defineProperty(Game.prototype, "turnNumber", {
+        get: function () {
+            return this._turnNumber;
+        },
+        enumerable: false,
+        configurable: true
+    });
+    Object.defineProperty(Game.prototype, "gamestate", {
+        get: function () {
+            return this._gamestate;
+        },
+        enumerable: false,
+        configurable: true
+    });
+    Game.prototype.incrementTurn = function () {
+        this._turnNumber++;
+    };
+    Game.prototype.setGamestate = function (newGamestate) {
+        this._gamestate = newGamestate;
+    };
+    Game.prototype.takeTurn = function () {
         var direction = promptSync('Which direction do you want to move? (use wasd)');
-        gameState = playField.move(direction);
-        switch (gameState) {
+        var movement = this._field.move(direction, this._playerCoords);
+        if (Array.isArray(movement)) {
+            this._playerCoords = movement;
+            this._gamestate = this._field.checkTile(this._playerCoords);
+        }
+        else {
+            console.log('Returned gamestate');
+            this._gamestate = movement;
+        }
+        switch (game.gamestate) {
             case GameState.Won:
                 console.log('Congratulations! You found your hat!');
                 return;
@@ -169,6 +188,25 @@ var playGame = function () {
                 console.log('An unknown error occurred');
                 return;
         }
-    }
-};
-playGame();
+    };
+    Game.prototype.playGame = function () {
+        while (this._gamestate === GameState.Playing) {
+            playField.print();
+            this.takeTurn();
+            this.incrementTurn();
+            if (this._hardmode) {
+                this._field.addSprite(Sprites.Hole);
+            }
+        }
+    };
+    return Game;
+}());
+var initialField = [
+    [Sprites.FieldCharacter, Sprites.FieldCharacter, Sprites.Hole],
+    [Sprites.FieldCharacter, Sprites.Hole, Sprites.FieldCharacter],
+    [Sprites.FieldCharacter, Sprites.Hat, Sprites.FieldCharacter],
+];
+// const playField = new Field( { field: initialField } );
+var playField = new Field({ height: 4, width: 5 });
+var game = new Game(playField, false);
+game.playGame();
