@@ -208,5 +208,5 @@ var initialField = [
 ];
 // const playField = new Field( { field: initialField } );
 var playField = new Field({ height: 4, width: 5 });
-var game = new Game(playField, false);
+var game = new Game(playField, true);
 game.playGame();
